@@ -1,0 +1,67 @@
+// Simple Express backend with file upload, tags, and SQLite DB
+const express = require('express');
+const multer = require('multer');
+const cors = require('cors');
+const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
+const fs = require('fs');
+
+const app = express();
+const port = process.env.PORT || 3001;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use('/uploads', express.static('uploads'));
+
+// SQLite setup
+const db = new sqlite3.Database('./posts.db');
+db.serialize(() => {
+  db.run(\`CREATE TABLE IF NOT EXISTS posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT,
+    image TEXT,
+    tags TEXT,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )\`);
+});
+
+// Multer for image upload
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = './uploads';
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname));
+  },
+});
+const upload = multer({ storage });
+
+// Upload route
+app.post('/upload', upload.single('image'), (req, res) => {
+  const { title, tags, description } = req.body;
+  const imagePath = \`/uploads/\${req.file.filename}\`;
+  db.run(
+    \`INSERT INTO posts (title, image, tags, description) VALUES (?, ?, ?, ?)\`,
+    [title, imagePath, tags, description],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ id: this.lastID, title, image: imagePath, tags, description });
+    }
+  );
+});
+
+// Get posts
+app.get('/posts', (req, res) => {
+  db.all(\`SELECT * FROM posts ORDER BY created_at DESC\`, (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
+app.listen(port, () => {
+  console.log(\`Server running on http://localhost:\${port}\`);
+});
